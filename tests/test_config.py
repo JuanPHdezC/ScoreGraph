@@ -73,10 +73,10 @@ def test_get_rubric_by_criterio(temp_db):
 
 
 def test_seed_risk_rules_inserted(temp_db):
-    """Verifica que se insertan reglas de riesgo semilla."""
+    """Verifica que se insertan reglas de riesgo semilla (3 reglas ilustrativas)."""
     init_db()
     rules = get_active_risk_rules()
-    assert len(rules) >= 4  # Al menos las 4 por defecto
+    assert len(rules) == 3  # 3 reglas ilustrativas: cost_high, feasibility_low, novelty_patent
 
     # Verificar regla de costo alto
     cost_rules = get_risk_rules_by_criterio(Criterio.COST)
@@ -140,7 +140,7 @@ def test_idempotent_init(temp_db):
     assert len(rubrics) == 4  # No duplicados
 
     rules = get_active_risk_rules()
-    assert len(rules) >= 4  # No duplicados
+    assert len(rules) == 3  # No duplicados (3 reglas ilustrativas)
 
     weights = get_criteria_weights()
     assert weights.feasibility == 0.25

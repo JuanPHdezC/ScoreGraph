@@ -210,6 +210,7 @@ def _seed_risk_rules(cursor: sqlite3.Cursor) -> None:
     import json
 
     risk_rules = [
+        # EJEMPLO ILUSTRATIVO — umbral debe validarse con negocio antes de producción
         RiskRule(
             id="risk_cost_high",
             criterio=Criterio.COST,
@@ -218,6 +219,7 @@ def _seed_risk_rules(cursor: sqlite3.Cursor) -> None:
             valor_umbral=5000000.0,
             descripcion_razon="Costo estimado superior a $5M requiere validación ejecutiva"
         ),
+        # EJEMPLO ILUSTRATIVO — umbral debe validarse con negocio antes de producción
         RiskRule(
             id="risk_feasibility_low",
             criterio=Criterio.FEASIBILITY,
@@ -226,6 +228,7 @@ def _seed_risk_rules(cursor: sqlite3.Cursor) -> None:
             valor_umbral=30,
             descripcion_razon="Factibilidad muy baja (score < 30) requiere revisión técnica"
         ),
+        # EJEMPLO ILUSTRATIVO — umbral debe validarse con negocio antes de producción
         RiskRule(
             id="risk_novelty_patent_collision",
             criterio=Criterio.NOVELTY,
@@ -233,14 +236,6 @@ def _seed_risk_rules(cursor: sqlite3.Cursor) -> None:
             operador=OperadorRiesgo.IS_TRUE,
             valor_umbral=True,
             descripcion_razon="Posible colisión de patente detectada, requiere revisión legal"
-        ),
-        RiskRule(
-            id="risk_impact_very_high",
-            criterio=Criterio.IMPACT,
-            campo_a_evaluar="score",
-            operador=OperadorRiesgo.GT,
-            valor_umbral=90,
-            descripcion_razon="Impacto extremadamente alto (score > 90) requiere validación de expectativas"
         ),
     ]
 

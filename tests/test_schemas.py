@@ -144,6 +144,32 @@ class TestRiskRule:
         )
         assert rule.valor_umbral is True
 
+    def test_invalid_operator_fails(self):
+        """Operador fuera del enum debe lanzar ValidationError."""
+        with pytest.raises(ValidationError) as exc_info:
+            RiskRule(
+                id="risk_3",
+                criterio=Criterio.COST,
+                campo_a_evaluar="costo_estimado_usd",
+                operador="invalid",  # type: ignore[arg-type]
+                valor_umbral=1000000.0,
+                descripcion_razon="Test"
+            )
+        assert "operador" in str(exc_info.value).lower()
+
+    def test_invalid_operator_gte_fails(self):
+        """Operador 'gte' (no en enum) debe lanzar ValidationError."""
+        with pytest.raises(ValidationError) as exc_info:
+            RiskRule(
+                id="risk_4",
+                criterio=Criterio.COST,
+                campo_a_evaluar="costo_estimado_usd",
+                operador="gte",  # type: ignore[arg-type]
+                valor_umbral=1000000.0,
+                descripcion_razon="Test"
+            )
+        assert "operador" in str(exc_info.value).lower()
+
 
 class TestCriteriaWeights:
     """Tests para pesos de criterios."""
@@ -198,6 +224,26 @@ class TestEvaluationState:
             EvaluationState(proposal_id="1", proposal_text="t", weighted_score=-1)
         with pytest.raises(ValidationError):
             EvaluationState(proposal_id="1", proposal_text="t", weighted_score=101)
+
+    def test_invalid_optional_type_fails(self):
+        """Campo Optional tipado como modelo específico debe rechazar tipo incorrecto."""
+        with pytest.raises(ValidationError) as exc_info:
+            EvaluationState(
+                proposal_id="prop_123",
+                proposal_text="Test",
+                feasibility_result="no es un objeto FeasibilityEvaluation"  # type: ignore[arg-type]
+            )
+        assert "feasibility_result" in str(exc_info.value).lower()
+
+    def test_invalid_optional_type_cost_result_fails(self):
+        """campo cost_result debe rechazar tipo incorrecto."""
+        with pytest.raises(ValidationError) as exc_info:
+            EvaluationState(
+                proposal_id="prop_123",
+                proposal_text="Test",
+                cost_result=12345  # type: ignore[arg-type]
+            )
+        assert "cost_result" in str(exc_info.value).lower()
 
 
 class TestEnums:
