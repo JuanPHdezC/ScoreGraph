@@ -1,0 +1,1 @@
+# Proposal Evaluator - Config Package
