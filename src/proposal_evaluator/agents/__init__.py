@@ -7,6 +7,7 @@ from proposal_evaluator.agents.completeness_gate import check_completeness, chec
 from proposal_evaluator.agents.aggregator import calculate_weighted_score
 from proposal_evaluator.agents.risk_gate import evaluate_risk_rules
 from proposal_evaluator.agents.missing_info_node import missing_info_node, should_request_missing_info, build_missing_info_payload
+from proposal_evaluator.agents.synthesizer import synthesizer_agent, build_final_report, validate_numbers_in_narrative
 
 __all__ = [
     "feasibility_agent",
@@ -20,4 +21,7 @@ __all__ = [
     "missing_info_node",
     "should_request_missing_info",
     "build_missing_info_payload",
+    "synthesizer_agent",
+    "build_final_report",
+    "validate_numbers_in_narrative",
 ]

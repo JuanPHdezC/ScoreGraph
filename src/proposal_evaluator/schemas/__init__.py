@@ -104,8 +104,15 @@ class EvaluationState(BaseModel):
     # HITL
     hitl_required: bool = False
     hitl_reason: str | None = None
+    # NUEVO: Tipo de HITL para distinguir causa de pausa
+    hitl_type: str | None = Field(default=None, description="Tipo de HITL: 'risk' | 'narrative_hallucination' | 'narrative_hallucination_exhausted'")
+    # NUEVO: Contador independiente para regeneraciones de narrativa
+    narrative_retry_count: int = Field(default=0, ge=0)
+    # NUEVO: Decisión de HITL (viene del interrupt)
+    hitl_decision: dict | None = Field(default=None, description="Decisión humana del interrupt de HITL")
 
-    # Reporte final
+    # Sintetizador
     final_report: str | None = None
+    requiere_revision_manual: bool = False
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

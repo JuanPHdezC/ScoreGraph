@@ -21,6 +21,7 @@ from proposal_evaluator.agents.missing_info_node import (
     missing_info_node,
     should_request_missing_info,
 )
+from proposal_evaluator.agents.synthesizer import synthesizer_agent
 
 logger = structlog.get_logger(__name__)
 
@@ -75,20 +76,9 @@ def init_state_node(state: EvaluationState) -> EvaluationState:
     return state
 
 
-def synthesizer_placeholder(state: EvaluationState) -> EvaluationState:
-    """
-    Nodo placeholder del Sintetizador (Fase 4).
-    Por ahora solo pasa el estado; en Fase 4 generará el reporte narrativo.
-    """
-    proposal_id = state.proposal_id
-    logger.info("synthesizer_placeholder", proposal_id=proposal_id)
-    state.final_report = f"[Fase 4] Reporte pendiente para propuesta {proposal_id}. Score: {state.weighted_score}"
-    return state
-
-
 def hitl_pause_node(state: EvaluationState) -> EvaluationState:
     """
-    Nodo de pausa HITL por reglas de riesgo.
+    Nodo de pausa HITL por reglas de riesgo de negocio.
     Usa interrupt para esperar aprobación humana.
     """
     proposal_id = state.proposal_id
@@ -119,9 +109,79 @@ def hitl_pause_node(state: EvaluationState) -> EvaluationState:
         if approved:
             state.hitl_required = False
             state.hitl_reason = None
+            state.hitl_type = None
             logger.info("hitl_approved", proposal_id=proposal_id, comment=comment)
         else:
             logger.warning("hitl_rejected", proposal_id=proposal_id, comment=comment)
+    return state
+
+
+def narrative_hitl_pause_node(state: EvaluationState) -> EvaluationState:
+    """
+    Nodo de pausa HITL por alucinación en narrativa.
+    Usa interrupt para esperar decisión humana sobre la narrativa.
+    
+    Acciones válidas:
+    - approve_text: Humano aprueba la narrativa tal cual → ensamblar reporte y continuar
+    - regenerate: Humano pide regeneración → incrementar contador y volver a synthesizer_agent
+    """
+    proposal_id = state.proposal_id
+    payload = {
+        "proposal_id": proposal_id,
+        "message": "La narrativa generada contiene cifras no verificadas. Revisión humana requerida.",
+        "hitl_type": "narrative_hallucination",
+        "hitl_reason": state.hitl_reason,
+        "unrecognized_numbers": state.hitl_decision.get("unrecognized_numbers", []) if state.hitl_decision else [],
+        "qualitative_text_preview": state.hitl_decision.get("qualitative_text", "")[:300] if state.hitl_decision else "",
+        "allowed_values": state.hitl_decision.get("allowed_values", {}) if state.hitl_decision else {},
+        "weighted_score": state.weighted_score,
+        "individual_scores": {
+            "feasibility": state.feasibility_result.score if state.feasibility_result else None,
+            "impact": state.impact_result.score if state.impact_result else None,
+            "cost": state.cost_result.score if state.cost_result else None,
+            "novelty": state.novelty_result.score if state.novelty_result else None,
+        },
+    }
+    log_audit_event(
+        proposal_id=proposal_id,
+        event_type="narrative_hitl_paused",
+        event_data=payload,
+    )
+    logger.warning("narrative_hitl_pause", proposal_id=proposal_id, reason=state.hitl_reason)
+
+    user_decision = interrupt(payload)
+
+    # Procesar decisión humana
+    if user_decision and isinstance(user_decision, dict):
+        action = user_decision.get("action")
+        comment = user_decision.get("comment", "")
+        
+        # Guardar decisión en estado para que synthesizer_agent la procese
+        state.hitl_decision = {
+            "action": action,
+            "comment": comment,
+            "qualitative_text": state.hitl_decision.get("qualitative_text", "") if state.hitl_decision else "",
+            "unrecognized_numbers": state.hitl_decision.get("unrecognized_numbers", []) if state.hitl_decision else [],
+        }
+        
+        if action == "approve_text":
+            state.hitl_required = False
+            state.hitl_type = None
+            state.hitl_reason = None
+            logger.info("narrative_hitl_approved", proposal_id=proposal_id, action="approve_text")
+        elif action == "regenerate":
+            # Incrementar contador de regeneraciones
+            state.narrative_retry_count += 1
+            state.hitl_required = False
+            state.hitl_type = None
+            state.hitl_reason = None
+            state.final_report = None
+            logger.info("narrative_regeneration_requested", proposal_id=proposal_id, 
+                       retry_count=state.narrative_retry_count)
+        else:
+            # Acción inválida - mantener pausa
+            logger.warning("narrative_hitl_invalid_action", proposal_id=proposal_id, action=action)
+    
     return state
 
 
@@ -131,8 +191,12 @@ def route_after_agent(state: EvaluationState, agent_name: str) -> Literal["reque
     return "request_info" if missing else "continue"
 
 
-def route_after_aggregator(state: EvaluationState) -> Literal["hitl_pause", "synthesize"]:
-    return "hitl_pause" if state.hitl_required else "synthesize"
+def route_after_aggregator(state: EvaluationState) -> Literal["hitl_pause", "narrative_hitl_pause", "synthesize"]:
+    if not state.hitl_required:
+        return "synthesize"
+    if state.hitl_type == "narrative_hallucination":
+        return "narrative_hitl_pause"
+    return "hitl_pause"
 
 
 def route_after_missing_info(state: EvaluationState) -> str:
@@ -140,6 +204,26 @@ def route_after_missing_info(state: EvaluationState) -> str:
         if state.missing_fields_by_agent.get(agent):
             return agent
     return "join_agents"
+
+
+def route_after_narrative_hitl(state: EvaluationState) -> Literal["synthesize", "narrative_hitl_pause", "end"]:
+    """
+    Después de narrative_hitl_pause, decide a dónde ir:
+    - Si action == "approve_text": END (synthesizer ya ensambló el reporte)
+    - Si action == "regenerate": synthesizer (para regenerar narrativa)
+    - Si acción inválida o agotado límite: END (exhausted)
+    """
+    if not state.hitl_decision:
+        return "end"
+    
+    action = state.hitl_decision.get("action")
+    
+    if action == "approve_text":
+        return "end"  # synthesizer ya ensambló el reporte
+    elif action == "regenerate":
+        return "synthesize"  # volver a synthesizer para regenerar
+    else:
+        return "end"  # acción inválida o agotado → terminar
 
 
 # ─── Wrappers para agentes: devuelven solo campos modificados (partial state) ───
@@ -215,7 +299,8 @@ def _build_graph(use_memory: bool = False) -> StateGraph:
     graph.add_node("aggregator", calculate_weighted_score)
     graph.add_node("risk_gate", evaluate_risk_rules)
     graph.add_node("hitl_pause", hitl_pause_node)
-    graph.add_node("synthesize", synthesizer_placeholder)
+    graph.add_node("narrative_hitl_pause", narrative_hitl_pause_node)
+    graph.add_node("synthesize", synthesizer_agent)
     graph.add_node("join_agents", lambda s: s)  # Nodo barrera (fan-in)
 
     # Edge desde START
@@ -258,18 +343,29 @@ def _build_graph(use_memory: bool = False) -> StateGraph:
     # Aggregator → risk_gate
     graph.add_edge("aggregator", "risk_gate")
 
-    # Risk gate → HITL pause o synthesize
+    # Risk gate → HITL pause (riesgo), HITL pause (narrativa) o synthesize
     graph.add_conditional_edges(
         "risk_gate",
         route_after_aggregator,
         {
             "hitl_pause": "hitl_pause",
+            "narrative_hitl_pause": "narrative_hitl_pause",
             "synthesize": "synthesize",
         },
     )
 
-    # HITL pause → synthesize (tras aprobación)
+    # HITL pause (riesgo) → synthesize (tras aprobación)
     graph.add_edge("hitl_pause", "synthesize")
+
+    # Narrative HITL pause → sintetizador (para regenerar) o END (si aprobó)
+    graph.add_conditional_edges(
+        "narrative_hitl_pause",
+        route_after_narrative_hitl,
+        {
+            "synthesize": "synthesize",
+            "end": END,
+        },
+    )
 
     # Synthesize → END
     graph.add_edge("synthesize", END)
